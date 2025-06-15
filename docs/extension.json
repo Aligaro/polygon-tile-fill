@@ -1,6 +1,5 @@
 {
   "manifest_version": 1,
   "name": "Polygon Tile Fill",
-  "version": "1.0.0",
-  "entry": "polygon-tile-fill.js"
+  "version": "1.0.0"
 }
