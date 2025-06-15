@@ -1,108 +1,113 @@
 import * as sdk from "@owlbear-rodeo/sdk";
 
-const GRID_SIZE = 100;
-
-// Beispiel-Map mit Tags zu Tile-Asset-IDs
-const tilesByTag: Record<string, string[]> = {
-  wald: [
-    "assetIdWald1",
-    "assetIdWald2",
-    "assetIdWald3",
-  ],
-  stadt: [
-    "assetIdStadt1",
-    "assetIdStadt2",
-    "assetIdStadt3",
-  ],
-  wasser: [
-    "assetIdWasser1",
-    "assetIdWasser2",
-  ],
-};
-
-let selectedTag = "wald"; // default
-let isDragging = false;
-let placedPositions = new Set<string>();
-
-function gridSnap(value: number) {
-  return Math.floor(value / GRID_SIZE) * GRID_SIZE;
+interface Point {
+  x: number;
+  y: number;
 }
 
-// UI für Tag-Auswahl
-function createUI() {
-  const container = document.createElement("div");
-  container.style.position = "absolute";
-  container.style.top = "10px";
-  container.style.right = "10px";
-  container.style.backgroundColor = "rgba(255,255,255,0.8)";
-  container.style.padding = "8px";
-  container.style.borderRadius = "4px";
-  container.style.zIndex = "1000";
+// Hilfsfunktion: Zufälliges Element aus Array
+function randomChoice<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
-  const label = document.createElement("label");
-  label.textContent = "Tile-Tag auswählen: ";
-  container.appendChild(label);
+export default async function() {
+  // Alle Assets laden
+  const assets = await sdk.map.getAssets();
 
+  // Tiles nach Tag gruppieren
+  const tilesByTag = new Map<string, string[]>(); // tag => Array von asset-IDs
+
+  for (const asset of assets) {
+    if (asset.type !== "tile") continue;
+
+    const tags = asset.tags || (asset.metadata && asset.metadata.tags) || [];
+
+    for (const tag of tags) {
+      if (!tilesByTag.has(tag)) {
+        tilesByTag.set(tag, []);
+      }
+      tilesByTag.get(tag)!.push(asset.id);
+    }
+  }
+
+  // Falls keine Tags, Fallback auf alle Tiles unter "all"
+  if (tilesByTag.size === 0) {
+    tilesByTag.set("all", assets.filter(a => a.type === "tile").map(a => a.id));
+  }
+
+  // Erstelle UI Dropdown für Tag-Auswahl
   const select = document.createElement("select");
-  for (const tag in tilesByTag) {
+  select.style.position = "fixed";
+  select.style.top = "10px";
+  select.style.right = "10px";
+  select.style.zIndex = "9999";
+  select.style.padding = "6px 12px";
+  select.style.background = "white";
+  select.style.border = "1px solid #ccc";
+  select.style.borderRadius = "4px";
+  select.title = "Wähle den Tile-Tag";
+
+  for (const tag of tilesByTag.keys()) {
     const option = document.createElement("option");
     option.value = tag;
     option.textContent = tag;
     select.appendChild(option);
   }
-  select.value = selectedTag;
-  select.onchange = () => {
+
+  document.body.appendChild(select);
+
+  let selectedTag = select.value;
+
+  select.addEventListener("change", () => {
     selectedTag = select.value;
-    placedPositions.clear();
-  };
-  container.appendChild(select);
+  });
 
-  document.body.appendChild(container);
+  // Funktion zum Platzieren eines Tiles an (x, y)
+  async function placeTile(x: number, y: number) {
+    const tileIds = tilesByTag.get(selectedTag);
+    if (!tileIds || tileIds.length === 0) return;
+
+    const tileId = randomChoice(tileIds);
+
+    await sdk.scene.addTile({
+      assetId: tileId,
+      position: { x, y },
+      rotation: 0,
+      width: sdk.grid.getGridSize(),
+      height: sdk.grid.getGridSize(),
+    });
+  }
+
+  // Drag-Event Listener für Karte (mouse down + move)
+  let dragging = false;
+
+  window.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0) return; // nur linker Klick
+    dragging = true;
+    handlePointer(ev);
+  });
+
+  window.addEventListener("mouseup", (ev) => {
+    if (ev.button !== 0) return;
+    dragging = false;
+  });
+
+  window.addEventListener("mousemove", (ev) => {
+    if (!dragging) return;
+    handlePointer(ev);
+  });
+
+  // Funktion zur Positionsbestimmung auf Grid
+  function handlePointer(ev: MouseEvent) {
+    const gridSize = sdk.grid.getGridSize();
+
+    // Mausposition in Map-Koordinaten (local zu Map)
+    const mapPos = sdk.viewport.screenToWorld({ x: ev.clientX, y: ev.clientY });
+
+    // Auf Grid ausrichten
+    const x = Math.floor(mapPos.x / gridSize) * gridSize;
+    const y = Math.floor(mapPos.y / gridSize) * gridSize;
+
+    placeTile(x, y);
+  }
 }
-
-const extension = sdk.ext.registerExtension({
-  id: "polygon-tile-brush-with-tags",
-  name: "Polygon Tile Brush mit Tags",
-  init() {
-    console.log("Extension mit Tag-Brush gestartet");
-
-    createUI();
-
-    sdk.input.onMouseDown(() => {
-      isDragging = true;
-      placedPositions.clear();
-    });
-
-    sdk.input.onMouseUp(() => {
-      isDragging = false;
-      placedPositions.clear();
-    });
-
-    sdk.input.onMouseMove((event) => {
-      if (!isDragging) return;
-
-      const snappedX = gridSnap(event.position.x);
-      const snappedY = gridSnap(event.position.y);
-      const key = `${snappedX}_${snappedY}`;
-
-      if (!placedPositions.has(key)) {
-        // Zufälliges Tile aus dem aktuellen Tag-Set wählen
-        const tiles = tilesByTag[selectedTag];
-        if (!tiles || tiles.length === 0) return;
-
-        const randomIndex = Math.floor(Math.random() * tiles.length);
-        const assetId = tiles[randomIndex];
-
-        sdk.map.placeTile({
-          assetId,
-          x: snappedX,
-          y: snappedY,
-        });
-
-        placedPositions.add(key);
-      }
-    });
-  },
-});
-
-export default extension;
