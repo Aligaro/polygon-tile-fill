@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main   # oder dein Haupt-Branch
+on:
+  workflow_dispatch:
 
 jobs:
   build-deploy:
