@@ -16,4 +16,8 @@
   "scripts": {
   "build": "vite build"
   }
+  "devDependencies": {
+  "vite": "^4.x.x"
+  }
+
 }
